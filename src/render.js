@@ -3,10 +3,12 @@
   'use strict';
   const L = 23.77, NET = L / 2, W = 5.485, SG = 4.115;
   const CAM = { f: 1915, h: 12.7, d: 30, hz: -341, cx: 640 };
+  const BASE_CX = 640;
 
   const COLORS = {
-    stands: '#141F33', standsRow: '#1B2A44', surround: '#3F6B4C', court: '#2C5A8F', line: '#FFFFFF',
-    me: '#F59E3B', opp: '#5B8DEF', ball: '#E8F24C', ballEdge: '#9AA82A',
+    surround: '#3D6B4D', surroundNear: '#4A7C5B', court: '#2C5A8F', courtLight: '#3A6FA8', line: '#F4F7FB',
+    me: '#F59E3B', meDark: '#C97A22', opp: '#5B8DEF', oppDark: '#3F6CC4', ball: '#E8F24C', ballEdge: '#9AA82A',
+    wall: '#0E1A40', wallText: '#E8EEF7',
   };
 
   function P(x, z, y) {
@@ -27,196 +29,244 @@
     ctx.ellipse(p.x, p.y, rx, rx * 0.32, 0, 0, Math.PI * 2);
   }
 
-  // Tudo que não se mexe (arquibancada, quadra, linhas) é desenhado uma vez numa camada separada.
-  let bgLayer = null;
-
-  function vgrad(ctx, z0, z1, c0, c1) {
-    const g = ctx.createLinearGradient(0, P(0, z0, 0).y, 0, P(0, z1, 0).y);
-    g.addColorStop(0, c0); g.addColorStop(1, c1);
-    return g;
-  }
-
-  function drawStands(ctx) {
-    const top = P(0, 27.5, 1.1).y;
-    const g = ctx.createLinearGradient(0, 0, 0, top);
-    g.addColorStop(0, '#0A1120'); g.addColorStop(1, '#17243C');
-    ctx.fillStyle = g; ctx.fillRect(0, 0, 1280, top);
-    // Torcida: cabeças em fileiras, com cores fixas (semente constante).
+  // ---------- fundo (torcida) em cache ----------
+  let crowd = null;
+  function makeCrowd() {
+    const c = document.createElement('canvas');
+    c.width = 1600; c.height = 720;
+    const g = c.getContext('2d');
+    const bg = g.createLinearGradient(0, 0, 0, 720);
+    bg.addColorStop(0, '#0A101C'); bg.addColorStop(1, '#162238');
+    g.fillStyle = bg; g.fillRect(0, 0, 1600, 720);
     let seed = 7;
     const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
-    const shirts = ['#3A4C6E', '#5B6F94', '#8A5A4A', '#B0846A', '#4F7A64', '#6B5B8E', '#C9D4E5', '#9B4E5C'];
-    for (let row = 0, y = 10; y < top - 6; row++, y += 13) {
-      ctx.fillStyle = row % 2 ? '#131E33' : '#16233B'; ctx.fillRect(0, y + 7, 1280, 5);
-      for (let x = (row % 2) * 7; x < 1280; x += 14) {
-        if (rnd() < 0.18) continue;
-        ctx.globalAlpha = 0.35 + 0.35 * (y / top);
-        ctx.fillStyle = shirts[Math.floor(rnd() * shirts.length)];
-        ctx.fillRect(x - 4, y + 3, 8, 5);
-        ctx.fillStyle = rnd() < 0.5 ? '#C9A27E' : '#7A5A44';
-        ctx.beginPath(); ctx.arc(x, y + 1, 3, 0, Math.PI * 2); ctx.fill();
+    const shirts = ['#3A4F7A', '#6B7A93', '#8FA6C8', '#B65A4A', '#C9A35A', '#4F7A5A', '#D9D2C5', '#2A3550', '#7A4F6B'];
+    for (let y = 8; y < 720; y += 11) {
+      const row = Math.floor(y / 11);
+      for (let x = (row % 2) * 6; x < 1600; x += 12) {
+        if (rnd() < 0.12) continue;
+        const shade = 0.55 + 0.45 * (y / 720);
+        g.globalAlpha = shade;
+        g.fillStyle = shirts[Math.floor(rnd() * shirts.length)];
+        g.fillRect(x, y + 3, 8, 7);
+        g.fillStyle = rnd() < 0.5 ? '#E0BC9A' : '#8A5E42';
+        g.beginPath(); g.arc(x + 4, y + 1.5, 3, 0, Math.PI * 2); g.fill();
       }
     }
-    ctx.globalAlpha = 1;
+    g.globalAlpha = 1;
+    return c;
+  }
+
+  // ---------- quadra ----------
+  // Linha com espessura real (em metros), para ficar mais fina ao fundo.
+  function courtLine(ctx, x1, z1, x2, z2, w) {
+    const h = w / 2;
+    if (Math.abs(x1 - x2) < 1e-6) poly(ctx, [[x1 - h, z1], [x1 + h, z1], [x2 + h, z2], [x2 - h, z2]], true);
+    else poly(ctx, [[x1, z1 - h], [x2, z2 - h], [x2, z2 + h], [x1, z1 + h]], true);
+    ctx.fill();
+  }
+
+  function boardText(ctx, x, z, y, text, sizeM, color) {
+    const p = P(x, z, y);
+    const px = (CAM.f * sizeM) / p.D;
+    ctx.save();
+    ctx.fillStyle = color;
+    ctx.font = '700 ' + px.toFixed(1) + 'px "Chakra Petch", sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(text, p.x, p.y);
+    ctx.restore();
   }
 
   function drawCourt(ctx) {
-    ctx.fillStyle = COLORS.stands; ctx.fillRect(0, 0, 1280, 720);
-    drawStands(ctx);
-    // O piso vai até z = -8 para preencher a parte de baixo da tela.
-    ctx.fillStyle = vgrad(ctx, 27.5, -8, '#2F5440', '#4A7A58');
-    poly(ctx, [[-14, -8], [14, -8], [14, 27.5], [-14, 27.5]], true); ctx.fill();
-    // Muro do fundo com faixa de patrocínio.
-    ctx.fillStyle = '#0E1A40'; poly(ctx, [[-14, 27.5, 0], [14, 27.5, 0], [14, 27.5, 1.1], [-14, 27.5, 1.1]], true); ctx.fill();
-    ctx.fillStyle = '#16275A'; poly(ctx, [[-14, 27.5, 0.75], [14, 27.5, 0.75], [14, 27.5, 1.1], [-14, 27.5, 1.1]], true); ctx.fill();
-    const w = P(0, 27.5, 0.38);
-    ctx.fillStyle = 'rgba(232,242,76,0.85)'; ctx.font = '700 12px "Press Start 2P", monospace';
-    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText('MOONBALLER', w.x - 260, w.y); ctx.fillText('MOONBALLER', w.x + 260, w.y);
-    ctx.fillStyle = 'rgba(238,242,248,0.7)'; ctx.font = '700 13px "Chakra Petch", sans-serif';
-    ctx.fillText('OPEN · QUADRA CENTRAL', w.x, w.y);
-    ctx.textBaseline = 'alphabetic';
-    // Quadra com leve degradê (mais clara perto da câmera).
-    ctx.fillStyle = vgrad(ctx, L, 0, '#27507F', '#3166A0');
-    poly(ctx, [[-W, 0], [W, 0], [W, L], [-W, L]], true); ctx.fill();
-    // Desgaste perto das linhas de base, onde se pisa mais.
-    for (const zb of [0.6, L - 0.6]) {
-      const c = P(0, zb, 0), rx = (CAM.f * 3.2) / c.D;
-      const g = ctx.createRadialGradient(c.x, c.y, 0, c.x, c.y, rx);
-      g.addColorStop(0, 'rgba(120,170,220,0.16)'); g.addColorStop(1, 'rgba(120,170,220,0)');
-      ctx.save(); ctx.translate(c.x, c.y); ctx.scale(1, 0.3); ctx.translate(-c.x, -c.y);
-      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(c.x, c.y, rx, 0, Math.PI * 2); ctx.fill(); ctx.restore();
-    }
-    ctx.strokeStyle = COLORS.line; ctx.lineJoin = 'round';
-    const lines = [
-      [[-W, 0], [W, 0]], [[W, 0], [W, L]], [[W, L], [-W, L]], [[-W, L], [-W, 0]],
-      [[-SG, 0], [-SG, L]], [[SG, 0], [SG, L]], [[-SG, NET - 6.4], [SG, NET - 6.4]], [[-SG, NET + 6.4], [SG, NET + 6.4]],
-      [[0, NET - 6.4], [0, NET + 6.4]], [[0, 0], [0, 0.35]], [[0, L], [0, L - 0.35]],
-    ];
-    // Espessura acompanha a distância: linhas do fundo mais finas.
-    for (const l of lines) {
-      const zMid = (l[0][1] + l[1][1]) / 2;
-      ctx.lineWidth = Math.max(1.5, (CAM.f * 0.05) / (zMid + CAM.d));
-      poly(ctx, l); ctx.stroke();
-    }
+    if (!crowd) crowd = makeCrowd();
+    ctx.drawImage(crowd, -160 + (CAM.cx - BASE_CX) * 0.4, 0);
+
+    // muros de propaganda
+    ctx.fillStyle = COLORS.wall;
+    poly(ctx, [[-10, 28, 0], [10, 28, 0], [10, 28, 1.2], [-10, 28, 1.2]], true); ctx.fill();
+    poly(ctx, [[-10, -7.5, 0], [-10, 28, 0], [-10, 28, 1.2], [-10, -7.5, 1.2]], true); ctx.fill();
+    poly(ctx, [[10, -7.5, 0], [10, 28, 0], [10, 28, 1.2], [10, -7.5, 1.2]], true); ctx.fill();
+    boardText(ctx, -4.5, 28, 0.6, 'MOONBALLER', 0.8, COLORS.wallText);
+    boardText(ctx, 4.5, 28, 0.6, 'OPEN', 0.8, COLORS.ball);
+
+    // piso em volta
+    const top = P(0, 28, 0).y, bottom = P(0, -7.5, 0).y;
+    const sg = ctx.createLinearGradient(0, top, 0, bottom);
+    sg.addColorStop(0, COLORS.surround); sg.addColorStop(1, COLORS.surroundNear);
+    ctx.fillStyle = sg; poly(ctx, [[-10, -7.5], [10, -7.5], [10, 28], [-10, 28]], true); ctx.fill();
+
+    // quadra com luz no centro
+    poly(ctx, [[-W, 0], [W, 0], [W, L], [-W, L]], true);
+    ctx.save(); ctx.clip();
+    const c = P(0, NET, 0);
+    const rg = ctx.createRadialGradient(c.x, c.y, 40, c.x, c.y, 520);
+    rg.addColorStop(0, COLORS.courtLight); rg.addColorStop(1, COLORS.court);
+    ctx.fillStyle = rg; ctx.fillRect(0, 0, 1280, 720);
+    // marcas de uso perto das linhas de base
+    ctx.fillStyle = 'rgba(255,255,255,0.05)';
+    for (const z of [-0.2, L + 0.2]) { groundEllipse(ctx, 0, z, 2.6); ctx.fill(); groundEllipse(ctx, 1.4, z, 1.6); ctx.fill(); groundEllipse(ctx, -1.6, z, 1.5); ctx.fill(); }
+    ctx.restore();
+
+    // linhas
+    ctx.fillStyle = COLORS.line;
+    courtLine(ctx, -W, 0, W, 0, 0.1); courtLine(ctx, -W, L, W, L, 0.1);
+    courtLine(ctx, -W, 0, -W, L, 0.05); courtLine(ctx, W, 0, W, L, 0.05);
+    courtLine(ctx, -SG, 0, -SG, L, 0.05); courtLine(ctx, SG, 0, SG, L, 0.05);
+    courtLine(ctx, -SG, NET - 6.4, SG, NET - 6.4, 0.05); courtLine(ctx, -SG, NET + 6.4, SG, NET + 6.4, 0.05);
+    courtLine(ctx, 0, NET - 6.4, 0, NET + 6.4, 0.05);
+    courtLine(ctx, 0, 0, 0, 0.3, 0.05); courtLine(ctx, 0, L - 0.3, 0, L, 0.05);
   }
 
-  function drawBackground(ctx) {
-    if (typeof document === 'undefined') return drawCourt(ctx);
-    if (!bgLayer) {
-      const k = Math.min(2, (typeof window !== 'undefined' && window.devicePixelRatio) || 1);
-      bgLayer = document.createElement('canvas');
-      bgLayer.width = 1280 * k; bgLayer.height = 720 * k;
-      const b = bgLayer.getContext('2d');
-      b.scale(k, k);
-      drawCourt(b);
-      // Refaz quando a fonte do placar de fundo terminar de carregar.
-      if (document.fonts && document.fonts.status !== 'loaded') document.fonts.ready.then(() => { bgLayer = null; });
-    }
-    ctx.drawImage(bgLayer, 0, 0, 1280, 720);
+  function drawUmpire(ctx) {
+    const x = -7.2, z = NET;
+    ctx.strokeStyle = '#2A3550'; ctx.lineWidth = 3;
+    for (const dx of [-0.35, 0.35]) { poly(ctx, [[x + dx, z, 0], [x + dx, z, 1.9]]); ctx.stroke(); }
+    ctx.fillStyle = '#2A3550'; poly(ctx, [[x - 0.45, z, 1.9], [x + 0.45, z, 1.9], [x + 0.45, z, 2.05], [x - 0.45, z, 2.05]], true); ctx.fill();
+    const seat = P(x, z, 2.05), s = (CAM.f * 0.9) / seat.D / 100;
+    ctx.save(); ctx.translate(seat.x, seat.y); ctx.scale(s, s);
+    rr(ctx, -16, -60, 32, 46, 8, '#1D2B4A');
+    rr(ctx, -14, -16, 28, 16, 6, '#D9D2C5');
+    ctx.fillStyle = '#D9B48F'; ctx.beginPath(); ctx.arc(0, -72, 11, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#F4F7FB'; ctx.beginPath(); ctx.ellipse(0, -80, 13, 5, 0, Math.PI, 0); ctx.fill();
+    ctx.restore();
   }
 
   function drawNet(ctx) {
-    // Sombra da rede no chão (luz vindo de trás da câmera).
+    // sombra da rede
     ctx.fillStyle = 'rgba(0,0,0,0.18)';
-    poly(ctx, [[-6.4, NET, 0], [6.4, NET, 0], [6.4, NET + 0.9, 0], [-6.4, NET + 0.9, 0]], true); ctx.fill();
-    ctx.fillStyle = 'rgba(11,19,34,0.45)';
-    poly(ctx, [[-6.4, NET, 0], [6.4, NET, 0], [6.4, NET, 1.07], [0, NET, 0.914], [-6.4, NET, 1.07]], true); ctx.fill();
-    // Malha.
-    ctx.save();
-    poly(ctx, [[-6.4, NET, 0], [6.4, NET, 0], [6.4, NET, 1.07], [0, NET, 0.914], [-6.4, NET, 1.07]], true); ctx.clip();
-    ctx.strokeStyle = 'rgba(220,228,240,0.16)'; ctx.lineWidth = 1;
-    for (let x = -6.4; x <= 6.4; x += 0.25) { poly(ctx, [[x, NET, 0], [x, NET, 1.1]]); ctx.stroke(); }
-    for (let y = 0.12; y < 1.07; y += 0.12) { poly(ctx, [[-6.4, NET, y], [6.4, NET, y]]); ctx.stroke(); }
+    poly(ctx, [[-6.4, NET + 0.05, 0], [6.4, NET + 0.05, 0], [6.4, NET - 0.9, 0], [-6.4, NET - 0.9, 0]], true); ctx.fill();
+    // malha
+    poly(ctx, [[-6.4, NET, 0], [6.4, NET, 0], [6.4, NET, 1.07], [0, NET, 0.914], [-6.4, NET, 1.07]], true);
+    ctx.fillStyle = 'rgba(10,16,28,0.42)'; ctx.fill();
+    ctx.save(); ctx.clip();
+    ctx.strokeStyle = 'rgba(220,228,240,0.18)'; ctx.lineWidth = 1;
+    for (let x = -6.4; x <= 6.4; x += 0.18) { poly(ctx, [[x, NET, 0], [x, NET, 1.07]]); ctx.stroke(); }
+    for (let y = 0.08; y < 1.07; y += 0.08) { poly(ctx, [[-6.4, NET, y], [6.4, NET, y]]); ctx.stroke(); }
     ctx.restore();
-    ctx.strokeStyle = '#F2F5FA'; ctx.lineWidth = 4;
-    poly(ctx, [[-6.4, NET, 1.07], [0, NET, 0.914], [6.4, NET, 1.07]]); ctx.stroke();
-    ctx.lineWidth = 2;
-    poly(ctx, [[0, NET, 0], [0, NET, 0.914]]); ctx.stroke();
-    ctx.strokeStyle = '#8C9AB3'; ctx.lineWidth = 5;
-    poly(ctx, [[-6.4, NET, 0], [-6.4, NET, 1.07]]); ctx.stroke();
-    poly(ctx, [[6.4, NET, 0], [6.4, NET, 1.07]]); ctx.stroke();
-  }
-
-  function drawVignette(ctx) {
-    const g = ctx.createRadialGradient(640, 340, 300, 640, 360, 820);
-    g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,0.28)');
-    ctx.fillStyle = g; ctx.fillRect(0, 0, 1280, 720);
+    // fita branca e faixa central
+    ctx.fillStyle = '#F4F7FB';
+    poly(ctx, [[-6.4, NET, 1.07], [0, NET, 0.914], [6.4, NET, 1.07], [6.4, NET, 1.0], [0, NET, 0.844], [-6.4, NET, 1.0]], true); ctx.fill();
+    poly(ctx, [[-0.03, NET, 0], [0.03, NET, 0], [0.03, NET, 0.88], [-0.03, NET, 0.88]], true); ctx.fill();
+    // postes
+    ctx.fillStyle = '#1D2B4A';
+    for (const x of [-6.4, 6.4]) { poly(ctx, [[x - 0.06, NET, 0], [x + 0.06, NET, 0], [x + 0.06, NET, 1.1], [x - 0.06, NET, 1.1]], true); ctx.fill(); }
   }
 
   function rr(ctx, x, y, w, h, r, fill) {
     ctx.beginPath(); ctx.roundRect(x, y, w, h, r); ctx.fillStyle = fill; ctx.fill();
   }
 
-  // Boneco: pés em (0,0), cabeça em -100 (1,85 m).
-  function drawFigure(ctx, pos, shirt, facing, swing, run) {
-    const p = P(pos.x, pos.z, 0);
-    const s = (CAM.f * 1.85) / p.D / 100;
+  // ---------- jogador ----------
+  // Pés em (0,0), topo da cabeça em -100 (1,85 m). facing +1 = de costas (você), -1 = de frente (adversário).
+  // pl.run: 0..1 o quanto está correndo; pl.phase: ciclo da passada; pl.stroke: 0..1 progresso do golpe;
+  // pl.prep: 0..1 preparação (raquete para trás); pl.lean: -1..1 inclinação lateral.
+  function drawFigure(ctx, pl) {
+    const p = P(pl.pos.x, pl.pos.z, 0);
+    const s = (CAM.f * 1.85) / p.D / 115;
+    const back = pl.facing > 0;
+    const run = pl.run || 0, ph = pl.phase || 0;
+    const legA = Math.sin(ph) * 0.55 * run, bob = -Math.abs(Math.sin(ph)) * 4 * run;
+    const shirt = pl.color, shirtDark = pl.colorDark || pl.color;
+    const skin = back ? '#E8C9A8' : '#D9B48F', skinDark = back ? '#C9A887' : '#B8946F';
+
     ctx.save();
     ctx.translate(p.x, p.y);
-    ctx.scale(facing * s, s);
-    // Sombra projetada para trás e para a direita, com borda suave.
-    const sg = ctx.createRadialGradient(6, -2, 2, 6, -2, 26);
-    sg.addColorStop(0, 'rgba(0,0,0,0.38)'); sg.addColorStop(1, 'rgba(0,0,0,0)');
-    ctx.fillStyle = sg;
-    ctx.beginPath(); ctx.ellipse(6, -2, 26, 7, 0, 0, Math.PI * 2); ctx.fill();
-    const skin = facing > 0 ? '#E8C9A8' : '#D9B48F';
-    // Correndo: pernas alternam e o corpo sobe e desce um pouco.
-    const st = run == null ? 0 : Math.sin(run);
-    const bob = run == null ? 0 : -Math.abs(Math.cos(run)) * 3;
-    rr(ctx, -12 + st * 4, -48, 8, 46 - Math.max(0, st) * 6, 3, skin);
-    rr(ctx, 4 - st * 4, -48, 8, 46 - Math.max(0, -st) * 6, 3, skin);
-    rr(ctx, -14 + st * 4, -6 - Math.max(0, st) * 6, 10, 6, 2, '#FFFFFF');
-    rr(ctx, 4 - st * 4, -6 - Math.max(0, -st) * 6, 10, 6, 2, '#FFFFFF');
+    // sombra
+    const sh = ctx.createRadialGradient(0, 0, 1, 0, 0, 26 * s);
+    sh.addColorStop(0, 'rgba(0,0,0,0.38)'); sh.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = sh; ctx.beginPath(); ctx.ellipse(4 * s, 0, 28 * s, 8 * s, 0, 0, Math.PI * 2); ctx.fill();
+
+    ctx.scale((back ? 1 : -1) * s, s);
+    ctx.rotate((pl.lean || 0) * 0.12);
     ctx.translate(0, bob);
-    rr(ctx, -13, -58, 26, 14, 3, facing > 0 ? '#1D2B4A' : '#E9EDF3');
-    rr(ctx, -14, -86, 28, 32, 7, shirt);
-    rr(ctx, -19, -82, 7, 24, 3, skin);
-    ctx.save(); ctx.translate(15, -82); ctx.rotate(-0.4 - swing * 1.2); rr(ctx, -3, 0, 7, 24, 3, skin);
-    ctx.strokeStyle = '#222222'; ctx.lineWidth = 3;
+
+    // pernas
+    const leg = (x, ang, front) => {
+      ctx.save(); ctx.translate(x, -50); ctx.rotate(ang);
+      rr(ctx, -4.5, 0, 9, 26, 4, front ? skin : skinDark);
+      rr(ctx, -4.5, 22, 9, 22, 4, front ? skin : skinDark);
+      rr(ctx, -4.5, 36, 9, 8, 2, '#F4F7FB');
+      rr(ctx, -6, 43, 13, 7, 3, '#F4F7FB');
+      ctx.restore();
+    };
+    leg(-7, legA, false);
+    leg(7, -legA, true);
+
+    // shorts e camisa
+    rr(ctx, -15, -60, 30, 17, 4, back ? '#1D2B4A' : '#E9EDF3');
+    rr(ctx, -16, -90, 32, 36, 9, shirt);
+    rr(ctx, back ? 6 : -16, -90, 10, 36, 9, shirtDark);
+    if (back) { ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.font = '700 15px "Chakra Petch", sans-serif'; ctx.textAlign = 'center'; ctx.fillText('7', 0, -66); }
+
+    // braço livre
+    ctx.save(); ctx.translate(-15, -86); ctx.rotate(0.25 + Math.sin(ph) * 0.4 * run - (pl.prep || 0) * 0.6);
+    rr(ctx, -3.5, 0, 7, 26, 3.5, skin); ctx.restore();
+
+    // braço da raquete
+    const prep = pl.prep || 0, st = pl.stroke || 0;
+    let ang = -0.35 - Math.sin(ph) * 0.3 * run;
+    if (st > 0 && st < 1) ang = -2.5 + st * 3.9;
+    else if (prep > 0) ang = -0.35 - prep * 2.1;
+    ctx.save(); ctx.translate(15, -86); ctx.rotate(ang);
+    rr(ctx, -3.5, 0, 7, 26, 3.5, skin);
+    ctx.strokeStyle = '#1A1A1A'; ctx.lineWidth = 3.5; ctx.lineCap = 'round';
     ctx.beginPath(); ctx.moveTo(0, 24); ctx.lineTo(0, 38); ctx.stroke();
-    ctx.beginPath(); ctx.ellipse(0, 47, 7, 10, 0, 0, Math.PI * 2); ctx.stroke();
+    ctx.fillStyle = 'rgba(240,240,230,0.35)'; ctx.strokeStyle = '#1A1A1A'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.ellipse(0, 48, 8, 11, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
     ctx.restore();
-    ctx.fillStyle = facing > 0 ? '#3B2A20' : skin;
-    ctx.beginPath(); ctx.arc(0, -93, 8, 0, Math.PI * 2); ctx.fill();
-    if (facing < 0) { ctx.fillStyle = '#2A1E16'; ctx.beginPath(); ctx.moveTo(-8, -95); ctx.quadraticCurveTo(0, -105, 8, -95); ctx.fill(); }
+    if (st > 0.15 && st < 0.85) {
+      ctx.strokeStyle = 'rgba(255,255,255,' + (0.5 * Math.sin(st * Math.PI)).toFixed(2) + ')';
+      ctx.lineWidth = 6; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.arc(15, -86, 58, -2.5 + Math.PI / 2, -2.5 + st * 3.9 + Math.PI / 2); ctx.stroke();
+    }
+
+    // cabeça
+    ctx.fillStyle = skin; ctx.fillRect(-3.5, -98, 7, 9);
+    if (back) {
+      ctx.fillStyle = '#3B2A20'; ctx.beginPath(); ctx.arc(0, -105, 9.5, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#F4F7FB'; ctx.fillRect(-9.5, -109, 19, 3.5);
+    } else {
+      ctx.fillStyle = skin; ctx.beginPath(); ctx.arc(0, -105, 9.5, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = pl.color; ctx.beginPath(); ctx.ellipse(0, -110, 10.5, 6, 0, Math.PI, 0); ctx.fill();
+      ctx.fillRect(-2, -110, 15, 3);
+    }
     ctx.restore();
   }
 
+  // ---------- bola ----------
   function drawBall(ctx, b, trail) {
+    if (trail && trail.length > 1) {
+      for (let i = 0; i < trail.length; i++) {
+        const q = P(trail[i].x, trail[i].z, trail[i].y);
+        const a = (i + 1) / trail.length;
+        ctx.fillStyle = 'rgba(232,242,76,' + (0.35 * a).toFixed(2) + ')';
+        ctx.beginPath(); ctx.arc(q.x, q.y, Math.max(1.5, (CAM.f * 0.09 * a) / q.D), 0, Math.PI * 2); ctx.fill();
+      }
+    }
     const sh = P(b.x, b.z, 0), p = P(b.x, b.z, b.y);
     const r = Math.max(3, (CAM.f * 0.12) / p.D);
-    // Sombra fica menor e mais fraca quanto mais alta a bola.
-    const k = 1 / (1 + (b.y || 0) * 0.35);
-    ctx.fillStyle = 'rgba(0,0,0,' + (0.4 * k).toFixed(3) + ')';
-    ctx.beginPath(); ctx.ellipse(sh.x, sh.y, r * (0.6 + 0.6 * k), r * 0.4 * (0.6 + 0.6 * k), 0, 0, Math.PI * 2); ctx.fill();
-    if (trail && trail.length > 1) {
-      ctx.save(); ctx.lineCap = 'round';
-      for (let i = 1; i < trail.length; i++) {
-        const a = P(trail[i - 1].x, trail[i - 1].z, trail[i - 1].y), c = P(trail[i].x, trail[i].z, trail[i].y);
-        ctx.strokeStyle = 'rgba(232,242,76,' + (0.45 * i / trail.length).toFixed(3) + ')';
-        ctx.lineWidth = r * 1.6 * (i / trail.length);
-        ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(c.x, c.y); ctx.stroke();
-      }
-      ctx.restore();
-    }
+    const k = Math.max(0.35, 1 - b.y / 5);
+    ctx.fillStyle = 'rgba(0,0,0,' + (0.35 * k).toFixed(2) + ')';
+    ctx.beginPath(); ctx.ellipse(sh.x, sh.y, r * (1.3 - k * 0.3), r * 0.45, 0, 0, Math.PI * 2); ctx.fill();
     const g = ctx.createRadialGradient(p.x - r * 0.35, p.y - r * 0.35, r * 0.1, p.x, p.y, r);
-    g.addColorStop(0, '#FBFFB0'); g.addColorStop(0.6, COLORS.ball); g.addColorStop(1, COLORS.ballEdge);
-    ctx.fillStyle = g;
-    ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI * 2); ctx.fill();
+    g.addColorStop(0, '#F8FFB0'); g.addColorStop(1, COLORS.ball);
+    ctx.fillStyle = g; ctx.strokeStyle = COLORS.ballEdge; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
   }
 
-  // Marca do quique: anel que abre e some.
-  function drawBounce(ctx, b) {
-    const age = b.age == null ? 1 : Math.min(1, b.age);
-    if (b.age != null && age < 1) {
-      ctx.save();
-      ctx.globalAlpha = 1 - age;
-      ctx.strokeStyle = '#FFFFFF'; ctx.lineWidth = 2;
-      groundEllipse(ctx, b.x, b.z, 0.3 + age * 0.9); ctx.stroke();
-      ctx.restore();
+  function drawMarks(ctx, marks, now) {
+    for (const m of marks || []) {
+      const age = (now - m.t0) / 1000;
+      if (age > 2.5) continue;
+      const a = Math.max(0, 1 - age / 2.5);
+      ctx.fillStyle = 'rgba(200,220,240,' + (0.35 * a).toFixed(2) + ')';
+      groundEllipse(ctx, m.x, m.z, 0.22); ctx.fill();
+      if (age < 0.4) {
+        ctx.strokeStyle = 'rgba(232,242,76,' + (0.8 * (1 - age / 0.4)).toFixed(2) + ')';
+        ctx.lineWidth = 2;
+        groundEllipse(ctx, m.x, m.z, 0.2 + age * 2); ctx.stroke();
+      }
     }
-    ctx.fillStyle = 'rgba(232,242,76,0.25)'; ctx.strokeStyle = COLORS.ball; ctx.lineWidth = 2.5;
-    groundEllipse(ctx, b.x, b.z, 0.3); ctx.fill(); ctx.stroke();
   }
 
   function drawPath(ctx, pts, color, dash, width) {
@@ -243,27 +293,40 @@
     return { lob: 5.5, drop: 1.6, slice: 0.7, serve: 0.2, smash: 0.1, volley: 0.4 }[kind] || 1.3;
   }
 
+  let vignette = null;
+  function drawVignette(ctx) {
+    if (!vignette) {
+      vignette = ctx.createRadialGradient(640, 330, 380, 640, 360, 820);
+      vignette.addColorStop(0, 'rgba(0,0,0,0)'); vignette.addColorStop(1, 'rgba(0,0,0,0.45)');
+    }
+    ctx.fillStyle = vignette; ctx.fillRect(0, 0, 1280, 720);
+  }
+
   function draw(ctx, v) {
-    drawBackground(ctx);
+    const now = v.now || 0;
+    // câmera acompanha a bola de leve
+    const want = BASE_CX - (v.camX || 0) * 14;
+    CAM.cx += (want - CAM.cx) * 0.06;
+
+    drawCourt(ctx);
+    drawMarks(ctx, v.marks, now);
     for (const z of v.zones || []) {
       groundEllipse(ctx, z.x, z.z, 1.1);
-      if (z.m < -0.1) { ctx.fillStyle = 'rgba(229,72,77,0.6)'; ctx.fill(); }
+      if (z.m < -0.1) { ctx.fillStyle = 'rgba(229,72,77,0.55)'; ctx.fill(); }
       ctx.save(); ctx.strokeStyle = '#FF8A8E'; ctx.lineWidth = 2; ctx.setLineDash(z.m < -0.1 ? [] : [4, 4]); ctx.stroke(); ctx.restore();
     }
+    const pulse = 0.5 + 0.5 * Math.sin(now / 260);
     for (const t of v.targets || []) {
       ctx.save();
       ctx.setLineDash(t.selected ? [] : [5, 5]);
       ctx.strokeStyle = t.selected ? COLORS.me : 'rgba(255,255,255,0.6)';
       ctx.lineWidth = t.selected ? 3 : 2;
-      groundEllipse(ctx, t.x, t.z, 0.8); ctx.stroke();
+      groundEllipse(ctx, t.x, t.z, t.selected ? 0.8 + pulse * 0.15 : 0.8); ctx.stroke();
       if (t.selected) { ctx.fillStyle = 'rgba(245,158,59,0.25)'; ctx.fill(); }
       const p = P(t.x, t.z, 0);
-      ctx.setLineDash([]);
-      ctx.beginPath(); ctx.arc(p.x, p.y, 9, 0, Math.PI * 2);
-      ctx.fillStyle = t.selected ? COLORS.me : 'rgba(11,19,34,0.75)'; ctx.fill();
-      ctx.fillStyle = t.selected ? '#0B1322' : '#FFFFFF';
-      ctx.font = '700 13px "Chakra Petch", sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText(t.label, p.x, p.y + 1);
+      ctx.fillStyle = t.selected ? '#FFD39A' : '#FFFFFF';
+      ctx.font = '700 14px "Chakra Petch", sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText(t.label, p.x, p.y + 5);
       ctx.restore();
     }
     if (v.recovery) {
@@ -274,16 +337,15 @@
     }
     const far = [], near = [];
     for (const pl of v.players) (pl.pos.z > NET ? far : near).push(pl);
-    if (v.bounce && v.bounce.z > NET) drawBounce(ctx, v.bounce);
-    far.forEach((pl) => drawFigure(ctx, pl.pos, pl.color, pl.facing, pl.swing || 0, pl.run));
-    // Bola do lado de lá da rede é desenhada antes dela, para a malha passar na frente.
+    far.forEach((pl) => drawFigure(ctx, pl));
     const ballFar = v.ball && v.ball.z > NET;
     if (ballFar) drawBall(ctx, v.ball, v.trail);
     if (v.path && v.path.far) drawPath(ctx, v.path.pts, v.path.color, v.path.dash, v.path.width);
+    drawUmpire(ctx);
     drawNet(ctx);
     if (v.path && !v.path.far) drawPath(ctx, v.path.pts, v.path.color, v.path.dash, v.path.width);
-    if (v.bounce && v.bounce.z <= NET) drawBounce(ctx, v.bounce);
-    near.sort((a, b) => b.pos.z - a.pos.z).forEach((pl) => drawFigure(ctx, pl.pos, pl.color, pl.facing, pl.swing || 0, pl.run));
+    if (v.bounce) { ctx.strokeStyle = COLORS.ball; ctx.lineWidth = 2.5; groundEllipse(ctx, v.bounce.x, v.bounce.z, 0.3); ctx.stroke(); }
+    near.sort((a, b) => b.pos.z - a.pos.z).forEach((pl) => drawFigure(ctx, pl));
     if (v.ball && !ballFar) drawBall(ctx, v.ball, v.trail);
     drawVignette(ctx);
   }

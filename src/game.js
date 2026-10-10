@@ -21,14 +21,38 @@
   let opts = [];
   let anim = null;
   let lastBounce = null;
+  let marks = [];
+  let trail = [];
+  const figs = { A: { phase: 0, run: 0, last: null }, B: { phase: 0, run: 0, last: null } };
+  let lastNow = 0;
 
   // ---------- desenho ----------
+  function fig(id, pos, extra) {
+    return Object.assign({
+      pos, facing: id === 'A' ? 1 : -1,
+      color: id === 'A' ? R.COLORS.me : R.COLORS.opp, colorDark: id === 'A' ? R.COLORS.meDark : R.COLORS.oppDark,
+    }, extra || {});
+  }
+
   function baseView() {
-    return {
-      players: ['A', 'B'].map((id) => ({
-        pos: s.players[id].pos, color: id === 'A' ? R.COLORS.me : R.COLORS.opp, facing: id === 'A' ? 1 : -1, swing: 0,
-      })),
-    };
+    return { players: ['A', 'B'].map((id) => fig(id, s.players[id].pos)) };
+  }
+
+  // Passada: a velocidade na tela vira corrida das pernas.
+  function animateLegs(v, now) {
+    const dt = Math.min(0.1, Math.max(0.001, (now - lastNow) / 1000));
+    lastNow = now;
+    v.players.forEach((pl, i) => {
+      const f = figs[i === 0 ? 'A' : 'B'];
+      const sp = f.last ? Math.hypot(pl.pos.x - f.last.x, pl.pos.z - f.last.z) / dt : 0;
+      f.last = { x: pl.pos.x, z: pl.pos.z };
+      f.run += (Math.min(1, sp / 3.5) - f.run) * 0.25;
+      f.phase += sp * dt * 3.4;
+      pl.run = f.run; pl.phase = f.phase;
+      if (f.run < 0.05) pl.phase = 0;
+      pl.lean = sp > 0.5 ? Math.max(-1, Math.min(1, (pl.pos.x - (f.prevX == null ? pl.pos.x : f.prevX)) * 8)) : 0;
+      f.prevX = pl.pos.x;
+    });
   }
 
   function frame(now) {
@@ -39,7 +63,12 @@
       if (mode === 'decide') decorateDecision(v);
       if (s.point && !s.point.over && mode !== 'decide') v.ball = { x: s.point.contact.x, z: s.point.contact.z, y: 1 };
       if (lastBounce) v.bounce = lastBounce;
+      trail = [];
     } else v = { players: [] };
+    v.now = now;
+    v.marks = marks;
+    if (v.ball) v.camX = v.ball.x;
+    animateLegs(v, now);
     R.draw(ctx, v);
     requestAnimationFrame(frame);
   }
@@ -47,6 +76,7 @@
   function decorateDecision(v) {
     const pt = s.point;
     v.ball = { x: pt.contact.x, z: pt.contact.z, y: pt.serve ? 2.6 : 0.95 };
+    v.players[0].prep = 1;
     v.targets = opts.map((o, i) => ({ x: o.aimW.x, z: o.aimW.z, label: String(i + 1), selected: o.shot.id === sel.shotId }));
     const cur = opts.find((o) => o.shot.id === sel.shotId);
     if (cur) {
@@ -82,47 +112,44 @@
       segs = [R.arcPoints(ev.origin, ev.bounce, h0, 0, peak, 30), R.arcPoints(ev.bounce, ev.contact, 0, 0.9, ev.shot.kind === 'lob' ? 2 : 0.5, 20)];
     }
     const pts = [].concat.apply([], segs);
-    // Momento do quique dentro da animação (fim do primeiro trecho).
-    const bounceT = segs.length > 1 ? (segs[0].length - 1) / (pts.length - 1) : null;
-    anim = { ev, t0: performance.now(), dur, pts, done, bounceT };
+    const bounceIdx = ev.quality === 'erro' || ev.volley ? pts.length - 1 : segs[0].length - 1;
+    anim = { ev, t0: performance.now(), dur, pts, done, bounceIdx, marked: false };
     mode = 'anim';
     setNarr('');
   }
 
   function animView(now) {
     const a = anim, ev = a.ev;
-    const t = Math.min(1, (now - a.t0) / a.dur);
+    const t = Math.max(0, Math.min(1, (now - a.t0) / a.dur));
     const v = { players: [] };
-    // Os jogadores aceleram e freiam em vez de deslizar em velocidade constante.
-    const te = t < 0.5 ? 2 * t * t : 1 - 2 * (1 - t) * (1 - t);
+    const sec = Math.max(0, (now - a.t0) / 1000);
+    const ease = (u) => u * (2 - u);
     for (const id of ['A', 'B']) {
       const f = ev.from[id], to = ev.to[id];
-      const dist = Math.hypot(to.x - f.x, to.z - f.z);
-      v.players.push({
-        pos: { x: f.x + (to.x - f.x) * te, z: f.z + (to.z - f.z) * te },
-        color: id === 'A' ? R.COLORS.me : R.COLORS.opp, facing: id === 'A' ? 1 : -1,
-        swing: id === ev.striker ? Math.max(0, 1 - t * 4) : 0,
-        run: dist > 0.4 && t < 0.97 ? dist * te * 2.6 : null,
-      });
+      const u = id === ev.striker ? ease(Math.max(0, (t - 0.12) / 0.88)) : ease(t);
+      v.players.push(fig(id, { x: f.x + (to.x - f.x) * u, z: f.z + (to.z - f.z) * u }, {
+        stroke: id === ev.striker && sec < 0.4 ? sec / 0.4 : 0,
+        prep: id !== ev.striker && t > 0.65 && ev.contact ? (t - 0.65) / 0.35 : 0,
+      }));
     }
-    v.ball = ballAt(a.pts, t);
-    v.trail = [];
-    for (let k = 6; k >= 0; k--) v.trail.push(ballAt(a.pts, Math.max(0, t - k * 0.012)));
-    const tb = a.bounceT != null ? a.bounceT : 0.5;
-    if (t > tb && ev.quality !== 'erro') v.bounce = { x: ev.bounce.x, z: ev.bounce.z, age: ((t - tb) * a.dur) / 600 };
+    const fi = t * (a.pts.length - 1), i0 = Math.floor(fi), i1 = Math.min(a.pts.length - 1, i0 + 1), k = fi - i0;
+    const p0 = a.pts[i0], p1 = a.pts[i1];
+    v.ball = { x: p0.x + (p1.x - p0.x) * k, z: p0.z + (p1.z - p0.z) * k, y: p0.y + (p1.y - p0.y) * k };
+    trail.push(v.ball);
+    if (trail.length > 8) trail.shift();
+    v.trail = trail;
+    if (!a.marked && fi >= a.bounceIdx && (ev.quality !== 'erro' || ev.errorKind === 'fora')) {
+      a.marked = true;
+      marks.push({ x: ev.bounce.x, z: ev.bounce.z, t0: now });
+      if (marks.length > 6) marks.shift();
+    }
+    if (t > 0.5 && ev.quality !== 'erro') v.bounce = ev.bounce;
     if (t >= 1) {
       anim = null;
       lastBounce = ev.bounce;
       setTimeout(a.done, 250);
     }
     return v;
-  }
-
-  // Posição da bola interpolada entre os pontos da trajetória.
-  function ballAt(pts, t) {
-    const f = t * (pts.length - 1), i = Math.min(pts.length - 2, Math.floor(f)), u = f - i;
-    const p = pts[i], q = pts[i + 1];
-    return { x: p.x + (q.x - p.x) * u, z: p.z + (q.z - p.z) * u, y: p.y + (q.y - p.y) * u };
   }
 
   // ---------- fluxo ----------
@@ -134,6 +161,7 @@
   function nextPoint() {
     $('overlay').hidden = true;
     lastBounce = null;
+    marks = [];
     E.startPoint(s);
     hud();
     setNarr(s.score.server === 'A' ? 'Seu saque.' : s.players.B.name + ' vai sacar.');
