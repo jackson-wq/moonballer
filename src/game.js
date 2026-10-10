@@ -82,7 +82,9 @@
       segs = [R.arcPoints(ev.origin, ev.bounce, h0, 0, peak, 30), R.arcPoints(ev.bounce, ev.contact, 0, 0.9, ev.shot.kind === 'lob' ? 2 : 0.5, 20)];
     }
     const pts = [].concat.apply([], segs);
-    anim = { ev, t0: performance.now(), dur, pts, done };
+    // Momento do quique dentro da animação (fim do primeiro trecho).
+    const bounceT = segs.length > 1 ? (segs[0].length - 1) / (pts.length - 1) : null;
+    anim = { ev, t0: performance.now(), dur, pts, done, bounceT };
     mode = 'anim';
     setNarr('');
   }
@@ -91,23 +93,36 @@
     const a = anim, ev = a.ev;
     const t = Math.min(1, (now - a.t0) / a.dur);
     const v = { players: [] };
+    // Os jogadores aceleram e freiam em vez de deslizar em velocidade constante.
+    const te = t < 0.5 ? 2 * t * t : 1 - 2 * (1 - t) * (1 - t);
     for (const id of ['A', 'B']) {
       const f = ev.from[id], to = ev.to[id];
+      const dist = Math.hypot(to.x - f.x, to.z - f.z);
       v.players.push({
-        pos: { x: f.x + (to.x - f.x) * t, z: f.z + (to.z - f.z) * t },
+        pos: { x: f.x + (to.x - f.x) * te, z: f.z + (to.z - f.z) * te },
         color: id === 'A' ? R.COLORS.me : R.COLORS.opp, facing: id === 'A' ? 1 : -1,
         swing: id === ev.striker ? Math.max(0, 1 - t * 4) : 0,
+        run: dist > 0.4 && t < 0.97 ? dist * te * 2.6 : null,
       });
     }
-    const i = Math.min(a.pts.length - 1, Math.floor(t * (a.pts.length - 1)));
-    v.ball = a.pts[i];
-    if (t > 0.5 && ev.quality !== 'erro') v.bounce = ev.bounce;
+    v.ball = ballAt(a.pts, t);
+    v.trail = [];
+    for (let k = 6; k >= 0; k--) v.trail.push(ballAt(a.pts, Math.max(0, t - k * 0.012)));
+    const tb = a.bounceT != null ? a.bounceT : 0.5;
+    if (t > tb && ev.quality !== 'erro') v.bounce = { x: ev.bounce.x, z: ev.bounce.z, age: ((t - tb) * a.dur) / 600 };
     if (t >= 1) {
       anim = null;
       lastBounce = ev.bounce;
       setTimeout(a.done, 250);
     }
     return v;
+  }
+
+  // Posição da bola interpolada entre os pontos da trajetória.
+  function ballAt(pts, t) {
+    const f = t * (pts.length - 1), i = Math.min(pts.length - 2, Math.floor(f)), u = f - i;
+    const p = pts[i], q = pts[i + 1];
+    return { x: p.x + (q.x - p.x) * u, z: p.z + (q.z - p.z) * u, y: p.y + (q.y - p.y) * u };
   }
 
   // ---------- fluxo ----------
