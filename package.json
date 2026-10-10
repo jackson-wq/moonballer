@@ -1,0 +1,11 @@
+{
+  "name": "moonballer",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Tênis tático por turnos",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test test/*.test.js",
+    "sim": "node tools/simulate.js"
+  }
+}

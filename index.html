@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Moonballer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&family=Press+Start+2P&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div id="wrap">
+  <div id="stage">
+    <canvas id="court" width="1280" height="720" aria-label="Quadra"></canvas>
+
+    <div id="scorebug" class="panel">
+      <div class="row"><span class="srv" data-srv="B"></span><span class="name" id="nameB">R. Duarte</span><span class="games" id="gamesB">0</span><span class="pts" id="ptsB">0</span></div>
+      <div class="row"><span class="srv" data-srv="A"></span><span class="name" id="nameA">Você</span><span class="games" id="gamesA">0</span><span class="pts" id="ptsA">0</span></div>
+    </div>
+
+    <div id="bars" class="panel">
+      <div class="bar"><span>Equilíbrio dele</span><i><b id="balB" class="opp"></b></i></div>
+      <div class="bar"><span>Seu equilíbrio</span><i><b id="balA" class="me"></b></i></div>
+      <div class="bar"><span>Fôlego dele</span><i><b id="stamB" class="stam"></b></i></div>
+      <div class="bar"><span>Seu fôlego</span><i><b id="stamA" class="stam"></b></i></div>
+    </div>
+
+    <div id="narr" class="panel" aria-live="polite"></div>
+
+    <div id="menu" class="box" hidden>
+      <div class="left">
+        <div class="prompt" id="prompt">O que você faz?</div>
+        <div class="hint" id="hint"></div>
+        <div class="shots" id="shots"></div>
+      </div>
+      <div class="right">
+        <div class="nums">
+          <div><span>Acerto</span><b id="pExec">0%</b></div>
+          <div><span>Ganha o ponto se entrar</span><b id="conv">0%</b></div>
+          <button id="go" class="go">Bater <kbd>Enter</kbd></button>
+        </div>
+        <div class="desc" id="desc"></div>
+        <div class="group"><span>Intensidade</span><div class="chips" id="ints"></div></div>
+        <div class="group"><span>Depois</span><div class="chips" id="recs"></div></div>
+      </div>
+    </div>
+
+    <div id="overlay" hidden>
+      <div class="card">
+        <div class="big" id="ovTitle"></div>
+        <p id="ovText"></p>
+        <button id="ovBtn" class="go"></button>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="src/engine.js"></script>
+<script src="src/render.js"></script>
+<script src="src/game.js"></script>
+</body>
+</html>
