@@ -35,58 +35,79 @@
     rede: 'Subir à rede',
   };
 
-  // Golpes. aim(c) devolve o alvo no referencial local de quem bate.
-  // c.s = lado do contato (+1 direita, -1 esquerda).
-  const SHOTS = [
-    { id: 'cruzada', name: 'Cruzada funda', tag: 'SEGURO', kind: 'drive', exec: 86, risk: 0.35, dmg: 12, pace: 18.5,
-      avail: (c) => !c.atNet, aim: (c) => ({ x: -c.s * 2.9, z: 21.2 }) },
-    { id: 'paralela', name: 'Paralela', tag: 'ATAQUE', kind: 'drive', exec: 72, risk: 0.6, dmg: 20, pace: 19.5,
-      avail: (c) => !c.atNet && !c.broken, aim: (c) => ({ x: c.s * 3.1, z: 21.2 }) },
-    { id: 'meio', name: 'No meio, fundo', tag: 'NEUTRO', kind: 'drive', exec: 91, risk: 0.2, dmg: 7, pace: 17.5,
-      avail: (c) => !c.atNet, aim: () => ({ x: 0, z: 21.6 }) },
-    { id: 'contrape', name: 'Contrapé', tag: 'SURPRESA', kind: 'drive', exec: 66, risk: 0.55, dmg: 22, pace: 18.5,
-      avail: (c) => !c.atNet && !c.broken && !c.recvAtNet && Math.abs(c.recvVel.x) > 0.35,
-      aim: (c) => ({ x: (c.recvVel.x > 0 ? -1 : 1) * 2.9, z: 20.6 }) },
-    { id: 'angulada', name: 'Curta angulada', tag: 'ARRISCADO', kind: 'drive', exec: 52, risk: 0.7, dmg: 24, pace: 15,
-      avail: (c) => !c.atNet && !c.broken && c.contact.z > 0.5, aim: (c) => ({ x: -c.s * 3.8, z: 16.6 }) },
-    { id: 'deixada', name: 'Deixadinha', tag: 'SURPRESA', kind: 'drop', exec: 54, risk: 0.5, dmg: 18, pace: 11,
-      avail: (c) => !c.atNet && !c.broken && c.contact.z > 1.5, aim: (c) => ({ x: -c.s * 1.4, z: 13.4 }) },
-    { id: 'passada', name: 'Passada', tag: 'ATAQUE', kind: 'drive', exec: 60, risk: 0.6, dmg: 26, pace: 20,
-      avail: (c) => !c.atNet && c.recvAtNet && !c.broken,
-      aim: (c) => ({ x: (c.recv.x >= 0 ? -1 : 1) * 3.7, z: 19.5 }) },
-    { id: 'slice', name: 'Slice defensivo', tag: 'DEFESA', kind: 'slice', exec: 94, risk: 0.15, dmg: 3, pace: 13,
-      avail: (c) => !c.atNet, aim: (c) => ({ x: -c.s * 0.8, z: 20.4 }) },
-    { id: 'balao', name: 'Balão', tag: 'DEFESA', kind: 'lob', exec: 80, risk: 0.4, dmg: 8, pace: 12,
-      avail: (c) => !c.atNet && (c.recvAtNet || c.broken), aim: (c) => ({ x: -c.s * 1.5, z: 21.0 }) },
-    { id: 'v_cruz', name: 'Voleio cruzado', tag: 'ATAQUE', kind: 'volley', exec: 76, risk: 0.45, dmg: 28, pace: 19,
-      avail: (c) => c.atNet && !c.high && !c.broken, aim: (c) => ({ x: -c.s * 3.5, z: 18.2 }) },
-    { id: 'v_par', name: 'Voleio na paralela', tag: 'ATAQUE', kind: 'volley', exec: 79, risk: 0.4, dmg: 24, pace: 19,
-      avail: (c) => c.atNet && !c.high && !c.broken, aim: (c) => ({ x: c.s * 3.4, z: 20.2 }) },
-    { id: 'v_curto', name: 'Voleio curto', tag: 'ARRISCADO', kind: 'volley', exec: 62, risk: 0.5, dmg: 32, pace: 10,
-      avail: (c) => c.atNet && !c.high && !c.broken, aim: (c) => ({ x: -c.s * 2.6, z: 14.6 }) },
-    { id: 'v_fundo', name: 'Voleio no meio, fundo', tag: 'SEGURO', kind: 'volley', exec: 88, risk: 0.25, dmg: 12, pace: 17,
-      avail: (c) => c.atNet && !c.high, aim: () => ({ x: 0, z: 21 }) },
-    { id: 'smash', name: 'Smash', tag: 'MATAR', kind: 'smash', exec: 74, risk: 0.4, dmg: 45, pace: 30,
-      avail: (c) => c.high && c.contact.z > 3 && !c.broken, aim: (c) => ({ x: -c.s * 2.6, z: 19.4 }) },
-    { id: 'smash_meio', name: 'Smash no meio', tag: 'SEGURO', kind: 'smash', exec: 86, risk: 0.3, dmg: 32, pace: 27,
-      avail: (c) => c.high && c.contact.z > 3, aim: () => ({ x: 0, z: 18.5 }) },
+  // Golpes: todo golpe sai em três direções e todas as combinações ficam sempre
+  // disponíveis. Escolha que não faz sentido na situação continua possível, só fica
+  // bem mais difícil (ver execProbs, que guarda o motivo de cada desconto).
+  // lr=true: direções são esquerda/meio/direita (absolutas). Senão cruzada/meio/paralela.
+  const STROKES = [
+    { id: 'forehand', name: 'Forehand', kind: 'drive', wing: 'fh', exec: 86, risk: 0.35, dmg: 12, pace: 18.5, z: 21.2, xw: 2.9,
+      desc: 'Golpe de fundo do lado direito. Seu golpe mais confiável quando a bola vem desse lado.' },
+    { id: 'backhand', name: 'Backhand', kind: 'drive', wing: 'bh', exec: 86, risk: 0.35, dmg: 12, pace: 18.5, z: 21.2, xw: 2.9,
+      desc: 'Golpe de fundo do lado esquerdo. Do lado do forehand fica torto e perde força.' },
+    { id: 'slice', name: 'Slice', kind: 'slice', exec: 92, risk: 0.2, dmg: 4, pace: 13, z: 20.4, xw: 2.6,
+      desc: 'Bola cortada, baixa e lenta. Segura e boa para ganhar tempo, mas não machuca.' },
+    { id: 'deixada', name: 'Deixadinha', kind: 'drop', lr: true, exec: 56, risk: 0.5, dmg: 18, pace: 11, z: 13.4, xw: 1.6,
+      desc: 'Bola curta logo depois da rede. Funciona de perto e com ele no fundo; de longe é um presente.' },
+    { id: 'voleio', name: 'Voleio', kind: 'volley', lr: true, exec: 80, risk: 0.4, dmg: 26, pace: 18, z: 19.6, xw: 3.4,
+      desc: 'Bater antes de quicar. Na rede é o golpe mais forte; do fundo vira meia-volei.' },
+    { id: 'smash', name: 'Smash', kind: 'smash', lr: true, exec: 78, risk: 0.4, dmg: 42, pace: 29, z: 19.4, xw: 2.6,
+      desc: 'Pancada por cima da cabeça. Só funciona em bola alta.' },
+    { id: 'balao', name: 'Balão', kind: 'lob', exec: 82, risk: 0.4, dmg: 8, pace: 12, z: 21, xw: 1.6,
+      desc: 'Bola alta e funda. Defende com tempo e castiga quem está colado na rede.' },
   ];
-
-  const SERVES = [
-    { id: 's_aberto', name: 'Saque aberto', tag: 'ATAQUE', kind: 'serve', exec: 60, risk: 0.85, dmg: 22, pace: 38,
-      first: true, aim: (c) => ({ x: -c.serve.side * 3.6, z: 17.8 }) },
-    { id: 's_t', name: 'Saque no T', tag: 'ATAQUE', kind: 'serve', exec: 62, risk: 0.85, dmg: 20, pace: 40,
-      first: true, aim: (c) => ({ x: -c.serve.side * 0.35, z: 17.9 }) },
-    { id: 's_corpo', name: 'Saque no corpo', tag: 'NEUTRO', kind: 'serve', exec: 66, risk: 0.8, dmg: 18, pace: 37,
-      first: true, aim: (c) => ({ x: -c.serve.side * 1.9, z: 17.6 }) },
-    { id: 's_seguro', name: 'Saque com spin, seguro', tag: 'SEGURO', kind: 'serve', exec: 90, risk: 0.6, dmg: 6, pace: 27,
-      first: true, second: true, aim: (c) => ({ x: -c.serve.side * 1.9, z: 16.6 }) },
-    { id: 's_2ag', name: '2º saque agressivo', tag: 'ARRISCADO', kind: 'serve', exec: 70, risk: 0.85, dmg: 14, pace: 33,
-      second: true, aim: (c) => ({ x: -c.serve.side * 3.2, z: 17.6 }) },
+  const SERVE_KINDS = [
+    { id: 'chapado', name: 'Saque chapado', kind: 'serve', exec: 62, risk: 0.85, dmg: 20, pace: 39, z: 17.8,
+      desc: 'Saque reto e forte. Faz aces, mas erra muito.' },
+    { id: 'spin', name: 'Saque com spin', kind: 'serve', exec: 88, risk: 0.6, dmg: 8, pace: 28, z: 16.8,
+      desc: 'Saque com efeito, mais lento e seguro. Bom como segundo saque.' },
   ];
+  const DIRS = {
+    cruz: { label: 'Cruzado', exec: 0, risk: 0, dmg: 1 },
+    meio: { label: 'Meio', exec: 5, risk: -0.15, dmg: 0.6 },
+    par: { label: 'Paralelo', exec: -12, risk: 0.25, dmg: 1.6 },
+  };
+  const LR = { esq: 'Esquerda', meio: 'Meio', dir: 'Direita' };
+  const SERVE_DIRS = {
+    aberto: { label: 'Aberto', x: 3.6, exec: -2, risk: 0, dmg: 1.1 },
+    corpo: { label: 'Corpo', x: 1.9, exec: 4, risk: -0.05, dmg: 0.85 },
+    t: { label: 'No T', x: 0.35, exec: 0, risk: 0, dmg: 1 },
+  };
+  const DIR_NAME = { cruz: 'cruzado', meio: 'no meio', par: 'paralelo', esq: 'na esquerda', dir: 'na direita', aberto: 'aberto', corpo: 'no corpo', t: 'no T' };
 
+  const SHOTS = [], SERVES = [];
+  for (const st of STROKES) {
+    for (const d of st.lr ? ['esq', 'meio', 'dir'] : ['cruz', 'meio', 'par']) {
+      SHOTS.push(Object.assign({}, st, { id: st.id + '_' + d, stroke: st.id, strokeName: st.name, dir: d, name: st.name + ' ' + DIR_NAME[d] }));
+    }
+  }
+  for (const st of SERVE_KINDS) {
+    for (const d of ['aberto', 'corpo', 't']) {
+      SERVES.push(Object.assign({}, st, { id: 'saque_' + st.id + '_' + d, stroke: st.id, strokeName: st.name, dir: d, name: st.name + ' ' + DIR_NAME[d] }));
+    }
+  }
   const ALL_SHOTS = SHOTS.concat(SERVES);
-  const BROKEN_OK = ['slice', 'meio', 'balao', 'v_fundo', 'smash_meio'];
+  const DEFENSIVE = (o, geo) => o.kind === 'slice' || o.kind === 'lob' || geo === 'meio';
+
+  // Números concretos de uma opção na situação atual (alvo no referencial de quem bate).
+  function spec(o, c) {
+    if (o.kind === 'serve') {
+      const d = SERVE_DIRS[o.dir];
+      return { o, geo: o.dir, exec: o.exec + d.exec, risk: o.risk + d.risk, dmg: o.dmg * d.dmg, pace: o.pace,
+        aimL: { x: -c.serve.side * d.x, z: o.z + (o.dir === 'aberto' ? 0 : 0.1) } };
+    }
+    let x, geo;
+    if (o.lr) {
+      x = o.dir === 'esq' ? -o.xw : o.dir === 'dir' ? o.xw : 0;
+      geo = x === 0 ? 'meio' : Math.sign(x) === c.s ? 'par' : 'cruz';
+    } else {
+      geo = o.dir;
+      x = geo === 'meio' ? 0 : geo === 'cruz' ? -c.s * o.xw : c.s * o.xw * 1.07;
+    }
+    const d = DIRS[geo];
+    let z = o.z + (geo === 'meio' ? 0.4 : 0);
+    if (o.kind === 'volley' && geo === 'cruz') z -= 1.4; // voleio cruzado sai mais curto e angulado
+    return { o, geo, exec: o.exec + d.exec, risk: clamp(o.risk + d.risk, 0.05, 0.95), dmg: o.dmg * d.dmg, pace: o.pace, aimL: { x, z } };
+  }
 
   // ---------- utilidades ----------
   function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
@@ -189,45 +210,65 @@
     };
   }
 
+  // Todas as opções, sempre. No saque, só os saques.
   function availableShots(s) {
-    const c = context(s);
-    if (c.serve) return SERVES.filter((o) => (c.serve.second ? o.second : o.first));
-    let list = SHOTS.filter((o) => o.avail(c));
-    if (c.broken) list = list.filter((o) => BROKEN_OK.includes(o.id));
-    if (!list.length) list = SHOTS.filter((o) => o.id === 'slice' || o.id === 'v_fundo').slice(0, 1);
-    return list;
+    return s.point.serve ? SERVES.slice() : SHOTS.slice();
   }
+
+  function fhSide(S) { return S.hand === 'R' ? 1 : -1; }
 
   function wingAttr(S, c, o) {
     if (o.kind === 'serve') return S.attrs.serve;
     if (o.kind === 'volley' || o.kind === 'smash') return S.attrs.volley;
-    const fhSide = S.hand === 'R' ? 1 : -1;
-    return c.s === fhSide ? S.attrs.fh : S.attrs.bh;
+    if (o.wing === 'fh') return S.attrs.fh;
+    if (o.wing === 'bh') return S.attrs.bh;
+    return c.s === fhSide(S) ? S.attrs.fh : S.attrs.bh;
   }
 
-  // Chance de execução (0..1) e divisão das saídas.
+  // Chance de execução (0..1), divisão das saídas e os motivos de cada ajuste.
   function execProbs(s, o, intensity) {
     const pt = s.point, S = s.players[pt.striker];
-    const c = context(s), it = INTENSITY[intensity];
-    let e = o.exec + (wingAttr(S, c, o) - 70) * 0.5 + it.exec;
-    e -= (100 - S.bal) * 0.22;
-    e -= Math.max(0, 60 - S.stam) * 0.3;
+    const c = context(s), it = INTENSITY[intensity], sp = spec(o, c);
+    const mods = [];
+    const mod = (d, text) => { if (Math.abs(d) >= 0.5) mods.push({ d, text }); };
+    const kindTxt = { drive: o.strokeName.toLowerCase(), slice: 'slice', drop: 'deixadinha', volley: 'voleio', smash: 'smash', lob: 'balão', serve: 'saque' }[o.kind];
+    const wa = (wingAttr(S, c, o) - 70) * 0.5;
+    mod(wa, wa > 0 ? 'é um golpe forte seu' : 'é um golpe fraco seu');
+    mod(it.exec, 'intensidade ' + it.label);
+    mod(-(100 - S.bal) * 0.22, S.broken ? 'equilíbrio zerado' : 'equilíbrio baixo');
+    mod(-Math.max(0, 60 - S.stam) * 0.3, 'pouco fôlego');
     if (!c.serve) {
-      if (S.mIn < 0) e -= 6 + 18 * Math.min(1, -S.mIn / 0.35);
-      else if (S.mIn < 0.3) e -= 6;
-      else if (S.mIn > 0.6 && o.risk >= 0.5) e += 5; // teve tempo para armar
-      if (S.nml) e -= 10;
-      e -= Math.max(0, pt.rally - T.rallyFrom) * 1.0;
-      if (c.contact.z > 2.5 && !c.atNet && o.risk >= 0.5) e += 7;
-      if (c.contact.z < -1.5 && o.risk >= 0.5) e -= 8;
-      if (c.broken) e -= 10;
-      if (c.high && o.kind !== 'smash' && o.kind !== 'lob') e -= 4;
+      const lowBall = !c.high;
+      if (S.mIn < 0) mod(-(6 + 18 * Math.min(1, -S.mIn / 0.35)), 'você chegou esticado');
+      else if (S.mIn < 0.3) mod(-6, 'você chegou correndo');
+      else if (S.mIn > 0.6 && sp.risk >= 0.5) mod(5, 'teve tempo para armar');
+      if (S.nml) mod(-10, 'estava parado no meio da quadra');
+      mod(-Math.max(0, pt.rally - T.rallyFrom) * 1.0, 'rally longo');
+      if (c.contact.z > 2.5 && !c.atNet && sp.risk >= 0.5) mod(7, 'bola curta para atacar');
+      if (c.contact.z < -1.5 && sp.risk >= 0.5) mod(-8, 'bola funda para golpe arriscado');
+      if (c.broken) mod(DEFENSIVE(o, sp.geo) ? -10 : -28, DEFENSIVE(o, sp.geo) ? 'equilíbrio quebrado' : 'equilíbrio quebrado: era hora de defender');
+      if (c.high && o.kind !== 'smash' && o.kind !== 'lob') mod(-4, 'bola alta');
+      // Escolhas que não combinam com a situação.
+      if (o.kind === 'volley' && !c.atNet) mod(c.contact.z > 3 ? -14 : -30, 'voleio longe da rede vira meia-volei');
+      if (o.kind === 'smash' && lowBall) mod(pt.sitter ? -16 : -40, pt.sitter ? 'smash em bola que não está alta' : 'smash em bola baixa');
+      else if (o.kind === 'smash' && c.contact.z < 3) mod(-12, 'smash do fundo da quadra');
+      if ((o.kind === 'drive' || o.kind === 'slice' || o.kind === 'lob') && c.atNet) mod(-10, kindTxt + ' estando na rede');
+      if (o.kind === 'drop' && c.contact.z < 0) mod(-22, 'deixadinha do fundo da quadra');
+      else if (o.kind === 'drop' && c.contact.z < 1.5) mod(-12, 'deixadinha de longe');
+      if (o.kind === 'drop' && c.recvAtNet) mod(-15, 'deixadinha com ele na rede');
+      if (o.wing && Math.abs(c.contact.x) >= 0.3) {
+        const fhs = c.s === fhSide(S);
+        if (o.wing === 'fh' && !fhs) mod(-8, 'forehand com a bola do lado do backhand');
+        if (o.wing === 'bh' && fhs) mod(-14, 'backhand com a bola do lado do forehand');
+      }
     }
+    const e = sp.exec + mods.reduce((t, m) => t + m.d, 0);
     const pExec = clamp(e, 5, 97) / 100;
     const pPerf = pExec * clamp(0.25 + it.perf, 0.05, 0.6);
     const fail = 1 - pExec;
-    const errShare = clamp(0.35 + o.risk * 0.6, 0.2, 0.95);
-    return { pExec, pPerf, pBom: pExec - pPerf, pErr: fail * errShare, pMed: fail * (1 - errShare) };
+    const errShare = clamp(0.35 + sp.risk * 0.6, 0.2, 0.95);
+    mods.sort((a, b) => a.d - b.d);
+    return { pExec, pPerf, pBom: pExec - pPerf, pErr: fail * errShare, pMed: fail * (1 - errShare), mods, base: sp.exec };
   }
 
   // Alvo real (mundo) para cada saída.
@@ -248,6 +289,8 @@
 
   // Onde quem recebe encontra a bola, e quanto tempo ela leva.
   function flight(originW, bounceW, o, paceMul, R) {
+    // Deixadinha de longe precisa ir mais forte: quica mais para frente e para menos no ar.
+    const far = o.kind === 'drop' ? clamp(dist(originW, bounceW) - 10, 0, 6) : 0;
     const dir = norm(sub(bounceW, originW));
     const rl = local(R.id, R.pos);
     let contact, high = o.kind === 'lob';
@@ -257,12 +300,12 @@
       const t = clamp(dot(sub(R.pos, originW), seg) / (len * len), 0.45, 1);
       contact = add(originW, seg, t);
     } else {
-      const [kmin, kmax] = o.kind === 'drop' ? [0.3, 1.6] : o.kind === 'lob' ? [1, 6] : o.kind === 'slice' ? [0.8, 5] : [0.8, 7];
+      const [kmin, kmax] = o.kind === 'drop' ? [0.3, 1.6 + far * 0.7] : o.kind === 'lob' ? [1, 6] : o.kind === 'slice' ? [0.8, 5] : [0.8, 7];
       const k = clamp(dot(sub(R.pos, bounceW), dir), kmin, kmax);
       contact = add(bounceW, dir, k);
     }
     const pace = o.pace * paceMul;
-    const time = dist(originW, contact) / pace + (o.kind === 'lob' ? 0.6 : o.kind === 'drop' ? 0.75 : 0.12);
+    const time = dist(originW, contact) / pace + (o.kind === 'lob' ? 0.6 : o.kind === 'drop' ? 0.75 - far * 0.15 : 0.12);
     return { contact, time, high, volley, dir };
   }
 
@@ -290,7 +333,8 @@
   function evaluate(s, o, intensity, estimate) {
     const pt = s.point, S = s.players[pt.striker], R = s.players[other(pt.striker)];
     const c = context(s), it = INTENSITY[intensity];
-    const aimL = o.aim(c);
+    const sp = spec(o, c), aimL = sp.aimL;
+    o = Object.assign({}, o, { dmg: sp.dmg, risk: sp.risk });
     const pr = execProbs(s, o, intensity);
     const lean = R.lean;
     if (estimate) R.lean = null;
@@ -305,7 +349,7 @@
     const cPerf = convOf('perfeito'), cBom = convOf('bom');
     R.lean = lean;
     const conv = pr.pExec > 0 ? (pr.pPerf * cPerf + pr.pBom * cBom) / pr.pExec : 0;
-    return Object.assign({ shot: o, intensity, aimL, aimW: world(S.id, aimL), conv, mExp }, pr);
+    return Object.assign({ shot: ALL_SHOTS.find((x) => x.id === o.id), intensity, aimL, aimW: world(S.id, aimL), conv, mExp, dmg: sp.dmg, geo: sp.geo }, pr);
   }
 
   function options(s) {
@@ -364,16 +408,17 @@
   // Resolve a escolha de quem está batendo. Devolve um evento para animar.
   function play(s, choice) {
     const pt = s.point, S = s.players[pt.striker], R = s.players[other(pt.striker)];
-    const o = ALL_SHOTS.find((x) => x.id === choice.shotId);
+    const shot = ALL_SHOTS.find((x) => x.id === choice.shotId);
     const it = INTENSITY[choice.intensity || 'firme'];
     const c = context(s);
-    const aimL = o.aim(c);
+    const sp = spec(shot, c), aimL = sp.aimL;
+    const o = Object.assign({}, shot, { dmg: sp.dmg, risk: sp.risk });
     const pr = execProbs(s, o, choice.intensity || 'firme');
     const r = s.rng();
     const quality = r < pr.pPerf ? 'perfeito' : r < pr.pExec ? 'bom' : r < pr.pExec + pr.pMed ? 'mediano' : 'erro';
     const originW = pt.contact;
     const ev = {
-      striker: S.id, receiver: R.id, shot: o, intensity: choice.intensity || 'firme', recovery: choice.recovery || 'centro',
+      striker: S.id, receiver: R.id, shot, intensity: choice.intensity || 'firme', recovery: choice.recovery || 'centro',
       quality, origin: originW, rally: pt.rally, probs: pr, from: { [S.id]: S.pos, [R.id]: R.pos },
     };
     S.stam = clamp(S.stam - 0.3 - it.stam, 0, 100);
@@ -400,6 +445,7 @@
         return ev;
       }
       const why = o.kind === 'serve' ? 'Dupla falta' : net ? 'Na rede' : 'Fora';
+      ev.ending = o.kind === 'serve' ? 'dupla' : 'erro';
       return endPoint(s, ev, R.id, why + '. ' + (S.id === 'A' ? 'Você errou ' : S.name + ' errou ') + lower(o.name) + '.');
     }
 
@@ -429,7 +475,8 @@
       moveToward(R, f.contact, f.time);
       ev.to = { [S.id]: S.pos, [R.id]: R.pos };
       const what = o.kind === 'serve' ? 'Ace' : 'Winner';
-      return endPoint(s, ev, S.id, what + '! ' + (R.id === 'A' ? 'Você não chegou' : R.name + ' não chegou') + ' na ' + lower(o.name) + '.');
+      ev.ending = o.kind === 'serve' ? 'ace' : 'winner';
+      return endPoint(s, ev, S.id, what + ' (' + lower(o.name) + ')! ' + (R.id === 'A' ? 'Você não chegou.' : R.name + ' não chegou.'));
     }
     const runFrom = R.pos;
     R.vel = norm(sub(f.contact, runFrom));
@@ -450,6 +497,7 @@
     ev.damage = Math.round(dmg);
 
     if (s.rng() < rp.pFE) {
+      ev.ending = 'forcado';
       return endPoint(s, ev, S.id, (R.id === 'A' ? 'Você chega ' : R.name + ' chega ') + (m < 0 ? 'esticado' : 'pressionado') + ' e erra. Ponto ' + (S.id === 'A' ? 'seu' : 'dele') + '.');
     }
 
@@ -458,7 +506,8 @@
     R.nml = R.nml && local(R.id, f.contact).z <= local(R.id, runFrom).z + 0.5;
     pt.striker = R.id;
     pt.contact = f.contact;
-    pt.high = f.high || quality === 'mediano';
+    pt.high = f.high;
+    pt.sitter = quality === 'mediano';
     pt.serve = null;
     ev.text = describe(S, R, o, quality, m);
     pt.events.push(ev);
@@ -513,20 +562,96 @@
     return { A: POINT_NAMES[p.A], B: POINT_NAMES[p.B], label: '' };
   }
 
+  // Quanto uma opção vale, considerando o ponto na hora e a pressão que deixa nele.
+  function value(s, e) {
+    const adv = 0.05 + (e.dmg * INTENSITY[e.intensity].dmg) / 80 - clamp(e.mExp - 0.4, 0, 1) * 0.15;
+    let u = e.pExec * (e.conv + (1 - e.conv) * adv) - e.pErr - e.pMed * 0.3;
+    if (e.shot.kind === 'serve' && !s.point.serve.second) u += e.pErr * 0.6; // primeiro saque tem segunda chance
+    return u;
+  }
+
+  function allChoices(s) {
+    const out = [];
+    for (const o of availableShots(s)) for (const k of Object.keys(INTENSITY)) {
+      const e = evaluate(s, o, k, true);
+      out.push({ e, v: value(s, e) });
+    }
+    return out;
+  }
+
+  // Foto da decisão antes de bater: o que foi escolhido e o que havia de melhor.
+  function review(s, choice) {
+    const pt = s.point, S = s.players[pt.striker];
+    const all = allChoices(s).sort((a, b) => b.v - a.v);
+    const chosen = all.find((x) => x.e.shot.id === choice.shotId && x.e.intensity === (choice.intensity || 'firme'));
+    const recov = {};
+    if (!pt.serve) {
+      for (const r of Object.keys(RECOVERY)) {
+        recov[r] = openCourt(s, Object.assign({}, choice, { recovery: r })).filter((z) => z.m < 0).length;
+      }
+    }
+    return { pid: S.id, choice, chosen, ranked: all.slice(0, 6), recov, serve: !!pt.serve, rally: pt.rally };
+  }
+
+  function pc(p) { return Math.round(p * 100) + '%'; }
+  function art(o) { return o.stroke === 'deixada' ? 'a ' : 'o '; }
+  function optName(e) { return e.shot.name + ', ' + INTENSITY[e.intensity].label.toLowerCase(); }
+
+  // Por que o ponto acabou como acabou, do ponto de vista do jogador `pid`.
+  // decisions: reviews das jogadas de pid neste ponto, em ordem.
+  function explain(s, ev, decisions, pid) {
+    pid = pid || 'A';
+    const lost = ev.winner !== pid;
+    const last = decisions.filter((d) => d.pid === pid).slice(-1)[0];
+    const out = { lost, cause: [], better: [] };
+    const opp = s.players[other(pid)].name;
+    if (ev.striker === pid) {
+      const pr = ev.probs;
+      const bad = pr.mods.filter((m) => m.d <= -3).slice(0, 3);
+      if (lost) {
+        out.cause.push('Você errou ' + art(ev.shot) + lower(ev.shot.name) + (ev.errorKind ? ' (' + ev.errorKind + ')' : '') + '. Esse golpe tinha ' + pc(pr.pExec) + ' de acerto.');
+        if (pr.base < 75) out.cause.push(ev.shot.name + ' já é difícil por natureza: começa em ' + pr.base + '% antes de contar a situação.');
+        if (bad.length) out.cause.push('Pesou contra: ' + bad.map((m) => m.text + ' (' + Math.round(m.d) + ')').join(', ') + '.');
+        if (pr.pExec >= 0.75) out.cause.push('Foi uma escolha boa que não entrou: com ' + pc(pr.pExec) + ', uma em cada ' + Math.max(2, Math.round(1 / (1 - pr.pExec))) + ' sai.');
+      } else if (pr.pExec < 0.45) {
+        out.cause.push('Deu certo, mas ' + art(ev.shot) + lower(ev.shot.name) + ' tinha só ' + pc(pr.pExec) + ' de acerto.');
+      }
+    } else if (lost) {
+      if (ev.ending === 'ace') out.cause.push('Ace de ' + opp + '. Na devolução não há decisão sua: foi o risco dele que entrou.');
+      else if (ev.ending === 'winner') out.cause.push(opp + ' bateu ' + lower(ev.shot.name) + ' e você não chegou.');
+      else out.cause.push('Você chegou ' + (ev.margin < 0 ? 'esticado' : 'pressionado') + (ev.shot.stroke === 'deixada' ? ' na ' : ' no ') + lower(ev.shot.name) + ' dele e errou.');
+      const events = s.point.events;
+      const prev = events.slice(0, -1).filter((e) => e.striker === pid).slice(-1)[0];
+      if (prev && ev.ending !== 'ace') {
+        if (prev.quality === 'mediano') out.cause.push('Sua bola anterior saiu curta, no meio da quadra, e deu a ele uma bola para atacar.');
+        else if (prev.margin > 0.6) out.cause.push('Sua bola anterior (' + lower(prev.shot.name) + ') chegou confortável: ele teve tempo para armar.');
+        if (last && last.recov && last.recov[last.choice.recovery] != null) {
+          const r = last.choice.recovery, n = last.recov[r];
+          // Só sugere voltar ao centro ou ficar: o modelo de áreas não pune quem sobe à rede contra balão.
+          const bestR = ['centro', 'ficar'].sort((a, b) => last.recov[a] - last.recov[b])[0];
+          if (last.recov[bestR] <= n - 2) {
+            out.cause.push('Depois de bater você escolheu "' + RECOVERY[r] + '" e deixou ' + n + ' de 5 áreas fora do seu alcance. "' + RECOVERY[bestR] + '" deixaria ' + last.recov[bestR] + '.');
+          }
+        }
+      }
+    }
+    if (last && last.chosen && ev.ending !== 'ace' && (lost || out.cause.length)) {
+      const ch = last.chosen;
+      out.chosen = { name: optName(ch.e), pExec: ch.e.pExec, conv: ch.e.conv };
+      for (const x of last.ranked) {
+        if (out.better.length >= 3) break;
+        if (x.v < ch.v + 0.04) break;
+        if (out.better.some((b) => b.shotId === x.e.shot.id)) continue;
+        out.better.push({ shotId: x.e.shot.id, name: optName(x.e), pExec: x.e.pExec, conv: x.e.conv });
+      }
+    }
+    return out;
+  }
+
   // ---------- IA ----------
   function aiChoose(s) {
     const pt = s.point, S = s.players[pt.striker];
-    const cands = [];
-    for (const o of availableShots(s)) {
-      for (const k of Object.keys(INTENSITY)) {
-        const e = evaluate(s, o, k, true);
-        const adv = 0.05 + (o.dmg * INTENSITY[k].dmg) / 80 - clamp(e.mExp - 0.4, 0, 1) * 0.15;
-        let u = e.pExec * (e.conv + (1 - e.conv) * adv) - e.pErr - e.pMed * 0.3;
-        u += S.aggression * e.pExec * e.conv * 0.5;
-        if (o.kind === 'serve' && !pt.serve.second) u += e.pErr * 0.6; // primeiro saque tem segunda chance
-        cands.push({ e, u });
-      }
-    }
+    const cands = allChoices(s).map((x) => ({ e: x.e, u: x.v + S.aggression * x.e.pExec * x.e.conv * 0.5 }));
     const temp = 0.06;
     const max = Math.max.apply(null, cands.map((c) => c.u));
     const ws = cands.map((c) => Math.exp((c.u - max) / temp));
@@ -536,7 +661,7 @@
     const o = pick.e.shot;
     const cL = local(S.id, pt.contact);
     let recovery = 'centro';
-    const aggressive = o.tag === 'ATAQUE' || o.tag === 'MATAR' || o.kind === 'volley';
+    const aggressive = o.kind === 'volley' || o.kind === 'smash' || pick.e.geo === 'par' || pick.e.dmg >= 18;
     if (cL.z >= T.netZ - 1) recovery = 'rede';
     else if (cL.z > 1.5 && aggressive && o.kind !== 'serve' && s.rng() < S.attrs.volley / 110) recovery = 'rede';
     else if (S.stam < 40 && Math.abs(cL.x) < 2.5 && cL.z > -1.5) recovery = 'ficar';
@@ -548,7 +673,7 @@
     const pt = s.point, S = s.players[pt.striker], R = s.players[other(pt.striker)];
     const o = ALL_SHOTS.find((x) => x.id === choice.shotId);
     const c = context(s);
-    const aimL = o.aim(c);
+    const aimL = spec(o, c).aimL;
     const it = INTENSITY[choice.intensity || 'firme'];
     const bounce = landing(Object.assign({}, s, { rng: null }), o, 'bom', aimL);
     const f = flight(pt.contact, bounce, o, it.pace, R);
@@ -576,8 +701,8 @@
   }
 
   return {
-    L, NET, SW, INTENSITY, RECOVERY, SHOTS, SERVES,
-    newMatch, startPoint, options, evaluate, availableShots, play, aiChoose, openCourt, prepareTurn,
+    L, NET, SW, INTENSITY, RECOVERY, SHOTS, SERVES, STROKES, SERVE_KINDS, DIRS, LR, SERVE_DIRS,
+    newMatch, startPoint, options, evaluate, availableShots, play, aiChoose, openCourt, prepareTurn, review, explain, spec,
     readHint, scoreText, local, world, other, context,
   };
 });

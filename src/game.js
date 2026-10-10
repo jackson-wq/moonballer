@@ -17,8 +17,11 @@
 
   let s = null;
   let mode = 'idle'; // idle | decide | anim | over
-  let sel = { shotId: null, intensity: 'firme', recovery: 'centro' };
+  let sel = { stroke: 'forehand', dir: 0, intensity: 'firme', recovery: 'centro' };
   let opts = [];
+  let decisions = [];
+  let showOdds = false;
+  try { showOdds = localStorage.getItem('moonballer.dicas') === '1'; } catch (e) { /* sem armazenamento */ }
   let anim = null;
   let lastBounce = null;
   let marks = [];
@@ -77,17 +80,19 @@
     const pt = s.point;
     v.ball = { x: pt.contact.x, z: pt.contact.z, y: pt.serve ? 2.6 : 0.95 };
     v.players[0].prep = 1;
-    v.targets = opts.map((o, i) => ({ x: o.aimW.x, z: o.aimW.z, label: String(i + 1), selected: o.shot.id === sel.shotId }));
-    const cur = opts.find((o) => o.shot.id === sel.shotId);
+    v.targets = opts.map((o, i) => ({ x: o.aimW.x, z: o.aimW.z, label: DIR_KEYS[i].toUpperCase(), selected: i === sel.dir }));
+    const cur = opts[sel.dir];
     if (cur) {
       const peak = R.peakFor(cur.shot.kind);
       v.path = {
         pts: R.arcPoints(pt.contact, cur.aimW, pt.serve ? 2.6 : 1, 0, peak, 24),
         color: R.COLORS.me, dash: [10, 6], width: 3.5, far: false,
       };
-      try {
-        v.zones = E.openCourt(s, sel).filter((z) => z.m < 0.15);
-      } catch (e) { v.zones = []; }
+      if (showOdds) {
+        try {
+          v.zones = E.openCourt(s, choice()).filter((z) => z.m < 0.15);
+        } catch (e) { v.zones = []; }
+      }
       const S = s.players.A;
       const aim = cur.aimL;
       const to = sel.recovery === 'ficar' ? null
@@ -163,6 +168,7 @@
     lastBounce = null;
     marks = [];
     E.startPoint(s);
+    decisions = [];
     hud();
     setNarr(s.score.server === 'A' ? 'Seu saque.' : s.players.B.name + ' vai sacar.');
     turn();
@@ -179,6 +185,7 @@
 
   function resolve(choice) {
     $('menu').hidden = true;
+    if (s.control[s.point.striker] === 'human') decisions.push(E.review(s, choice));
     const ev = E.play(s, choice);
     playEvent(ev, () => {
       hud();
@@ -198,6 +205,7 @@
     if (ev.setWon) { title = ev.setWon === 'A' ? 'Você venceu o set!' : 'Ele venceu o set.'; btn = 'Nova partida'; }
     $('ovTitle').textContent = title;
     $('ovText').textContent = ev.text + '\nTrocas no ponto: ' + s.point.rally + '.';
+    showWhy(E.explain(s, ev, decisions, 'A'));
     $('ovBtn').textContent = btn;
     $('ovBtn').onclick = ev.setWon ? newMatch : nextPoint;
     setNarr('');
@@ -205,12 +213,63 @@
     $('ovBtn').focus();
   }
 
+  function showWhy(x) {
+    const box = $('ovWhy');
+    box.innerHTML = '';
+    box.hidden = !(x && (x.cause.length || x.better.length));
+    if (box.hidden) return;
+    if (x.cause.length) {
+      const h = document.createElement('h3');
+      h.textContent = x.lost ? 'Por que você perdeu o ponto' : 'Olhando de novo';
+      box.appendChild(h);
+      for (const c of x.cause) { const p = document.createElement('p'); p.textContent = c; box.appendChild(p); }
+    }
+    if (x.better.length) {
+      const h = document.createElement('h3');
+      h.textContent = 'O que dava para fazer melhor';
+      box.appendChild(h);
+      const ul = document.createElement('ul');
+      const row = (label, o, mine) => {
+        const li = document.createElement('li');
+        if (mine) li.className = 'mine';
+        li.innerHTML = '<span class="n"></span><span class="p"></span>';
+        li.querySelector('.n').textContent = label + o.name;
+        li.querySelector('.p').textContent = 'acerto ' + pct(o.pExec) + ' · ponto ' + pct(o.conv);
+        ul.appendChild(li);
+      };
+      x.better.forEach((b) => row('', b, false));
+      if (x.chosen) row('Você jogou: ', x.chosen, true);
+      box.appendChild(ul);
+    }
+  }
+
   // ---------- menu ----------
+  const DIR_KEYS = ['a', 's', 'd'];
+
+  function strokesNow() { return s.point.serve ? E.SERVE_KINDS : E.STROKES; }
+  function dirsOf(st) {
+    if (st.kind === 'serve') return ['aberto', 'corpo', 't'];
+    return st.lr ? ['esq', 'meio', 'dir'] : ['cruz', 'meio', 'par'];
+  }
+  function dirLabel(st, d) {
+    if (st.kind === 'serve') return E.SERVE_DIRS[d].label;
+    return st.lr ? E.LR[d] : E.DIRS[d].label;
+  }
+  function shotIdOf(st, i) { return (st.kind === 'serve' ? 'saque_' : '') + st.id + '_' + dirsOf(st)[i]; }
+  function curStroke() { return strokesNow().find((x) => x.id === sel.stroke) || strokesNow()[0]; }
+  function choice() { return { shotId: shotIdOf(curStroke(), sel.dir), intensity: sel.intensity, recovery: sel.recovery }; }
+  const shotById = (id) => E.SHOTS.concat(E.SERVES).find((o) => o.id === id);
+
   function openMenu() {
     mode = 'decide';
     const pt = s.point;
-    const list = E.availableShots(s);
-    if (!list.find((o) => o.id === sel.shotId)) sel.shotId = list[0].id;
+    if (pt.serve) {
+      if (!E.SERVE_KINDS.find((x) => x.id === sel.stroke)) sel.stroke = pt.serve.second ? 'spin' : 'chapado';
+    } else {
+      // Começa no lado em que a bola está; o resto é escolha sua.
+      const c = E.context(s);
+      sel.stroke = c.atNet ? 'voleio' : (c.s > 0 ? 'forehand' : 'backhand');
+    }
     sel.recovery = sel.recovery || 'centro';
     refreshOptions();
     $('prompt').textContent = pt.serve ? (pt.serve.second ? 'Segundo saque.' : 'Seu saque.') : 'O que você faz?';
@@ -222,48 +281,62 @@
     const pt = s.point, A = s.players.A, c = E.context(s);
     if (pt.serve) return 'Lado ' + (pt.serve.side > 0 ? 'direito (iguais)' : 'esquerdo (vantagem)') + '.';
     const parts = [];
-    if (A.broken) parts.push('Seu equilíbrio quebrou: só dá para se defender.');
+    parts.push('Bola no seu ' + (c.s > 0 ? 'forehand' : 'backhand') + (pt.high ? ', alta' : pt.sitter ? ', curta e fácil' : '') + '.');
+    if (A.broken) parts.push('Seu equilíbrio quebrou.');
     else if (A.mIn < 0) parts.push('Você chegou esticado.');
-    else if (c.contact.z > 2.5 && !c.atNet) parts.push('Bola curta: janela de ataque.');
-    else if (A.mIn > 0.6) parts.push('Você chegou com tempo para armar.');
+    else if (c.contact.z > 2.5 && !c.atNet) parts.push('Você está dentro da quadra.');
+    else if (A.mIn > 0.6) parts.push('Você chegou com tempo.');
     if (A.nml) parts.push('Você estava no meio da quadra e a bola veio no pé.');
     if (c.atNet) parts.push('Você está na rede.');
+    else if (c.recvAtNet) parts.push(s.players.B.name + ' está na rede.');
     const h = E.readHint(s);
     if (h) parts.push(h);
     return parts.join(' ');
   }
 
   function refreshOptions() {
-    opts = E.availableShots(s).map((o) => E.evaluate(s, o, sel.intensity, true));
+    const st = curStroke();
+    sel.stroke = st.id;
+    opts = [0, 1, 2].map((i) => E.evaluate(s, shotById(shotIdOf(st, i)), sel.intensity, true));
+    $('menu').classList.toggle('odds', showOdds);
     const box = $('shots');
     box.innerHTML = '';
-    opts.forEach((o, i) => {
+    strokesNow().forEach((x, i) => {
       const b = document.createElement('button');
-      b.className = 'shot' + (o.shot.id === sel.shotId ? ' sel' : '');
+      b.className = 'shot' + (x.id === sel.stroke ? ' sel' : '');
       b.innerHTML = '<span class="k">' + (i + 1) + '</span><span class="n"></span><span class="p"></span>';
-      b.querySelector('.n').textContent = o.shot.name;
-      b.querySelector('.p').textContent = pct(o.pExec) + ' · ' + pct(o.conv);
-      b.onclick = () => { sel.shotId = o.shot.id; refreshOptions(); };
+      b.querySelector('.n').textContent = x.name;
+      if (showOdds) {
+        const e = E.evaluate(s, shotById(shotIdOf(x, sel.dir)), sel.intensity, true);
+        b.querySelector('.p').textContent = pct(e.pExec) + ' · ' + pct(e.conv);
+      }
+      b.onclick = () => { sel.stroke = x.id; refreshOptions(); };
       box.appendChild(b);
     });
-    const cur = opts.find((o) => o.shot.id === sel.shotId) || opts[0];
-    sel.shotId = cur.shot.id;
+    chips('dirs', dirsOf(st).map((d, i) => [i, dirLabel(st, d), DIR_KEYS[i].toUpperCase()]), sel.dir, (i) => { sel.dir = i; refreshOptions(); });
+    const cur = opts[sel.dir];
     $('pExec').textContent = pct(cur.pExec);
     $('conv').textContent = pct(cur.conv);
-    const press = cur.shot.dmg * E.INTENSITY[sel.intensity].dmg;
-    $('desc').textContent = cur.shot.tag + ' · pressão nele: ' + (press >= 24 ? 'alta' : press >= 13 ? 'média' : 'baixa') +
-      ' · erro ' + pct(cur.pErr) + ' · sai curta ' + pct(cur.pMed);
+    $('strokeDesc').textContent = st.desc;
+    if (showOdds) {
+      const press = cur.dmg * E.INTENSITY[sel.intensity].dmg;
+      const bad = cur.mods.filter((m) => m.d <= -5).slice(0, 2).map((m) => m.text);
+      $('desc').textContent = 'Pressão nele: ' + (press >= 24 ? 'alta' : press >= 13 ? 'média' : 'baixa') +
+        ' · erro ' + pct(cur.pErr) + ' · sai curta ' + pct(cur.pMed) + (bad.length ? ' · contra: ' + bad.join(', ') : '');
+    } else $('desc').textContent = '';
     chips('ints', Object.keys(E.INTENSITY).map((k) => [k, E.INTENSITY[k].label]), sel.intensity, (k) => { sel.intensity = k; refreshOptions(); });
     chips('recs', [['centro', 'Voltar ao centro'], ['ficar', 'Ficar'], ['rede', 'Subir à rede']], sel.recovery, (k) => { sel.recovery = k; refreshOptions(); });
+    $('oddsToggle').textContent = showOdds ? 'Esconder chances' : 'Mostrar chances';
   }
 
   function chips(id, items, current, onPick) {
     const box = $(id);
     box.innerHTML = '';
-    for (const [k, label] of items) {
+    for (const [k, label, key] of items) {
       const b = document.createElement('button');
       b.className = 'chip' + (k === current ? ' sel' : '');
       b.textContent = label;
+      if (key) { const kb = document.createElement('kbd'); kb.textContent = key; b.appendChild(kb); }
       b.onclick = () => onPick(k);
       box.appendChild(b);
     }
@@ -274,14 +347,24 @@
   function confirm() {
     if (mode !== 'decide') return;
     mode = 'anim';
-    resolve({ shotId: sel.shotId, intensity: sel.intensity, recovery: sel.recovery });
+    resolve(choice());
+  }
+
+  function toggleOdds() {
+    showOdds = !showOdds;
+    try { localStorage.setItem('moonballer.dicas', showOdds ? '1' : '0'); } catch (e) { /* sem armazenamento */ }
+    if (mode === 'decide') refreshOptions();
   }
 
   $('go').onclick = confirm;
+  $('oddsToggle').onclick = toggleOdds;
   document.addEventListener('keydown', (e) => {
     if (mode === 'decide') {
-      const n = Number(e.key);
-      if (n >= 1 && n <= opts.length) { sel.shotId = opts[n - 1].shot.id; refreshOptions(); }
+      const n = Number(e.key), k = e.key.toLowerCase();
+      const list = strokesNow();
+      if (n >= 1 && n <= list.length) { sel.stroke = list[n - 1].id; refreshOptions(); }
+      else if (DIR_KEYS.includes(k)) { sel.dir = DIR_KEYS.indexOf(k); refreshOptions(); }
+      else if (k === 'h') toggleOdds();
       else if (e.key === 'Enter') { e.preventDefault(); confirm(); }
     } else if (mode === 'over' && (e.key === 'Enter' || e.key === ' ')) {
       e.preventDefault(); $('ovBtn').click();
@@ -307,9 +390,11 @@
 
   // ---------- tela inicial ----------
   $('ovTitle').textContent = 'Moonballer';
-  $('ovText').textContent = 'Tênis tático por turnos. A cada bola você escolhe o golpe, a intensidade e para onde voltar.\n' +
-    'Cada golpe mostra duas chances: acertar o alvo e, se acertar, ganhar o ponto na hora.\n' +
-    'Áreas vermelhas na quadra = lugares onde você não chega se ele bater lá.\n\nVocê contra R. Duarte, um set.';
+  $('ovText').textContent = 'Tênis tático por turnos. A cada bola você escolhe o golpe, a direção, a intensidade e para onde voltar.\n' +
+    'Todos os golpes ficam sempre liberados, até os que não fazem sentido. Cabe a você ler a bola.\n' +
+    'As chances ficam escondidas. Quando perder um ponto, o jogo explica o porquê e mostra o que dava para fazer.\n' +
+    'Teclas: 1 a 7 golpe, A S D direção, H mostra ou esconde as chances, Enter bate.\n\nVocê contra R. Duarte, um set.';
+  $('ovWhy').hidden = true;
   $('ovBtn').textContent = 'Começar partida';
   $('ovBtn').onclick = newMatch;
   $('overlay').hidden = false;

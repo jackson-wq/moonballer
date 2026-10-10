@@ -20,9 +20,10 @@ Abra http://localhost:3020
 
 ## Como jogar
 
-- Teclas 1 a 9 escolhem o golpe, Enter confirma.
-- Cada golpe mostra duas chances: acertar o alvo e, se acertar, ganhar o ponto na hora.
-- As áreas vermelhas na quadra são os lugares onde você não chega se ele bater lá, considerando para onde você escolheu voltar.
+- Teclas 1 a 7 escolhem o golpe, A S D a direção, Enter bate.
+- Todos os golpes ficam sempre liberados. As chances começam escondidas; H (ou o botão Mostrar chances) mostra.
+- Com as chances visíveis, cada golpe mostra acertar o alvo e, se acertar, ganhar o ponto na hora, e as áreas vermelhas mostram onde você não chega se ele bater lá.
+- Quando você perde o ponto, o jogo explica o porquê e mostra opções melhores.
 
 As regras estão em [docs/regras-v0.md](docs/regras-v0.md).
 

@@ -29,14 +29,16 @@
 
     <div id="menu" class="box" hidden>
       <div class="left">
-        <div class="prompt" id="prompt">O que você faz?</div>
+        <div class="top"><div class="prompt" id="prompt">O que você faz?</div><button id="oddsToggle" class="toggle">Mostrar chances</button></div>
         <div class="hint" id="hint"></div>
         <div class="shots" id="shots"></div>
+        <div class="group"><span>Direção</span><div class="chips" id="dirs"></div></div>
       </div>
       <div class="right">
         <div class="nums">
-          <div><span>Acerto</span><b id="pExec">0%</b></div>
-          <div><span>Ganha o ponto se entrar</span><b id="conv">0%</b></div>
+          <div class="odds-only"><span>Acerto</span><b id="pExec">0%</b></div>
+          <div class="odds-only"><span>Ganha o ponto se entrar</span><b id="conv">0%</b></div>
+          <div class="no-odds stroke-desc" id="strokeDesc"></div>
           <button id="go" class="go">Bater <kbd>Enter</kbd></button>
         </div>
         <div class="desc" id="desc"></div>
@@ -49,6 +51,7 @@
       <div class="card">
         <div class="big" id="ovTitle"></div>
         <p id="ovText"></p>
+        <div id="ovWhy" class="why" hidden></div>
         <button id="ovBtn" class="go"></button>
       </div>
     </div>
